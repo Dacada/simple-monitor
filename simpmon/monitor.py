@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import concurrent.futures
 import datetime
 import logging
 import os
@@ -8,9 +9,10 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, Optional, Sequence, Type, Union
+from typing import Any, Callable, Optional, Sequence, Type
 
 import dbus  # type: ignore
+import ping3  # type: ignore
 import psutil
 from pydantic import BaseModel
 
@@ -312,22 +314,22 @@ class UptimeMonitor(Monitor):
 class DBusConnectionManager:
     _bus = None
 
-    def get_connection(self) -> Any:
-        if self._bus is None:
-            self._bus = dbus.SystemBus()
-        return self._bus
+    @staticmethod
+    def get_connection() -> Any:
+        if DBusConnectionManager._bus is None:
+            DBusConnectionManager._bus = dbus.SystemBus()
+        return DBusConnectionManager._bus
 
 
 class SystemdMonitor(Monitor):
     def __init__(self, config: config.SystemdMonitorConfig):
         self.service_name = config.service
-        self.connection_manager = DBusConnectionManager()
         self.systemd_proxy: Any = None
         self._initialize_proxy()
         super().__init__(config)
 
     def _initialize_proxy(self) -> None:
-        bus = self.connection_manager.get_connection()
+        bus = DBusConnectionManager.get_connection()
         systemd_object = bus.get_object(
             "org.freedesktop.systemd1", "/org/freedesktop/systemd1"
         )
@@ -339,7 +341,7 @@ class SystemdMonitor(Monitor):
         try:
             unit_name = f"{self.service_name}.service"
             unit = self.systemd_proxy.GetUnit(unit_name)
-            unit_object = self.connection_manager.get_connection().get_object(
+            unit_object = DBusConnectionManager.get_connection().get_object(
                 "org.freedesktop.systemd1", str(unit)
             )
             unit_properties = dbus.Interface(
@@ -365,6 +367,50 @@ class SystemdMonitor(Monitor):
         return "status"
 
 
+class ThreadManager:
+    _thread_executor = None
+
+    @staticmethod
+    def submit(target: Callable[..., Any]) -> concurrent.futures.Future[Any]:
+        if ThreadManager._thread_executor is None:
+            ThreadManager._thread_executor = concurrent.futures.ThreadPoolExecutor()
+        return ThreadManager._thread_executor.submit(target)
+
+
+class PingMonitor(Monitor):
+    def __init__(self, config: config.PingMonitorConfig):
+        self.ip = config.ip
+        self._last_ping = -1
+        self._ping_future: Optional[concurrent.futures.Future[Any]] = None
+        super().__init__(config)
+        self._start_ping()
+
+    def _start_ping(self) -> None:
+        if self._ping_future is not None:
+            return
+        self._ping_future = ThreadManager.submit(target=self._run_ping)
+
+    def _run_ping(self) -> None:
+        try:
+            response_time = ping3.ping(str(self.ip))
+            if response_time is None:
+                self._last_ping = -1
+            self._last_ping = response_time
+        except Exception as e:
+            logger.warning(f"Exception when trying to ping to {self.ip}: {e}")
+            self._last_ping = -1
+        finally:
+            self._ping_future = None
+
+    def get_datapoint(self) -> float:
+        self._start_ping()
+        return self._last_ping * 1000
+
+    @property
+    def unit(self) -> str:
+        return "miliseconds"
+
+
 MONITORS: dict[config.MonitorName, Type[Monitor]] = {
     config.MonitorName.LOAD_AVERAGE: LoadAverageMonitor,
     config.MonitorName.DISK_USAGE: DiskUsageMonitor,
@@ -372,6 +418,7 @@ MONITORS: dict[config.MonitorName, Type[Monitor]] = {
     config.MonitorName.TEMPERATURE: TemperatureMonitor,
     config.MonitorName.UPTIME: UptimeMonitor,
     config.MonitorName.SYSTEMD: SystemdMonitor,
+    config.MonitorName.PING: PingMonitor,
 }
 
 

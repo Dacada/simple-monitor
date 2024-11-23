@@ -9,6 +9,7 @@ psutil = "*"
 dbus-python = "*"
 types-psutil = "*"
 mypy = "*"
+ping3 = "*"
 
 [dev-packages]
 

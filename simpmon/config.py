@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import datetime
+import ipaddress
 import json
 import logging
 from enum import Enum
@@ -20,6 +21,7 @@ class MonitorName(str, Enum):
     TEMPERATURE = "TEMPERATURE"
     UPTIME = "UPTIME"
     SYSTEMD = "SYSTEMD"
+    PING = "PING"
 
 
 class AlarmerName(str, Enum):
@@ -99,6 +101,13 @@ class SystemdMonitorConfig(BaseModel):
     service: str
 
 
+class PingMonitorConfig(BaseModel):
+    name: Literal[MonitorName.PING]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    ip: ipaddress.IPv4Address
+
+
 class GmailAlarmerConfig(BaseModel):
     name: Literal[AlarmerName.GMAIL_ALARM]
     sender: str
@@ -116,6 +125,7 @@ MonitorConfig = Annotated[
         TemperatureMonitorConfig,
         UptimeMonitorConfig,
         SystemdMonitorConfig,
+        PingMonitorConfig,
     ],
     Field(discriminator="name"),
 ]
