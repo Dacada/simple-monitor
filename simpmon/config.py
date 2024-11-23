@@ -4,9 +4,10 @@ import datetime
 import json
 import logging
 from enum import Enum
+from pathlib import Path
 from typing import Literal, Optional, Union, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Annotated
 
 from simpmon import paths
@@ -14,6 +15,11 @@ from simpmon import paths
 
 class MonitorName(str, Enum):
     LOAD_AVERAGE = "LOAD_AVERAGE"
+    DISK_USAGE = "DISK_USAGE"
+    DISK_WRITE_RATE = "DISK_WRITE_RATE"
+    TEMPERATURE = "TEMPERATURE"
+    UPTIME = "UPTIME"
+    SYSTEMD = "SYSTEMD"
 
 
 class AlarmerName(str, Enum):
@@ -23,6 +29,13 @@ class AlarmerName(str, Enum):
 class MonitorAlarmExceedanceType(str, Enum):
     UNDER = "UNDER"
     OVER = "OVER"
+
+
+class DiskUsageValueType(str, Enum):
+    TOTAL = "TOTAL"
+    USED = "USED"
+    FREE = "FREE"
+    PERCENT = "PERCENT"
 
 
 class MonitorAlarmConfig(BaseModel):
@@ -40,6 +53,52 @@ class LoadAverageMonitorConfig(BaseModel):
     which: Annotated[int, Field(ge=0, lt=3)]
 
 
+class DiskUsageMonitorConfig(BaseModel):
+    name: Literal[MonitorName.DISK_USAGE]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    mountpoint: Path
+    which: DiskUsageValueType
+    unit_base: Literal[1000, 1024]
+    unit_exponent: Annotated[int, Field(ge=0, le=5)]
+
+    @field_validator("mountpoint")
+    def validate_mountpoint(cls, value: Path) -> Path:
+        if not value.is_mount():
+            raise ValueError(f"The path '{value}' is not a mount point.")
+        return value
+
+
+class DiskWriteRateMonitorConfig(BaseModel):
+    name: Literal[MonitorName.DISK_WRITE_RATE]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    disk: str
+    unit_base: Literal[1000, 1024]
+    unit_exponent: Annotated[int, Field(ge=0, le=5)]
+
+
+class TemperatureMonitorConfig(BaseModel):
+    name: Literal[MonitorName.TEMPERATURE]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    sensor_name: str
+    index: int
+
+
+class UptimeMonitorConfig(BaseModel):
+    name: Literal[MonitorName.UPTIME]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+
+
+class SystemdMonitorConfig(BaseModel):
+    name: Literal[MonitorName.SYSTEMD]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    service: str
+
+
 class GmailAlarmerConfig(BaseModel):
     name: Literal[AlarmerName.GMAIL_ALARM]
     sender: str
@@ -49,7 +108,17 @@ class GmailAlarmerConfig(BaseModel):
     app_password: str
 
 
-MonitorConfig = Annotated[Union[LoadAverageMonitorConfig], Field(discriminator="name")]
+MonitorConfig = Annotated[
+    Union[
+        LoadAverageMonitorConfig,
+        DiskUsageMonitorConfig,
+        DiskWriteRateMonitorConfig,
+        TemperatureMonitorConfig,
+        UptimeMonitorConfig,
+        SystemdMonitorConfig,
+    ],
+    Field(discriminator="name"),
+]
 AlarmerConfig = Annotated[Union[GmailAlarmerConfig], Field(discriminator="name")]
 
 

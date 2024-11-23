@@ -5,6 +5,10 @@ name = "pypi"
 
 [packages]
 pydantic = "*"
+psutil = "*"
+dbus-python = "*"
+types-psutil = "*"
+mypy = "*"
 
 [dev-packages]
 

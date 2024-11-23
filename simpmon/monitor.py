@@ -4,11 +4,14 @@ import datetime
 import logging
 import os
 import threading
+import time
 import uuid
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence, Type, Union
 
+import dbus  # type: ignore
+import psutil
 from pydantic import BaseModel
 
 from simpmon import config
@@ -182,7 +185,194 @@ class LoadAverageMonitor(Monitor):
         return "load"
 
 
-MONITORS = {config.MonitorName.LOAD_AVERAGE: LoadAverageMonitor}
+def _make_unit(base: int, exponent: int) -> str:
+    suffix = ["", "K", "M", "G", "T", "P"][exponent]
+    infix = "i" if base == 1024 and suffix else ""
+    return suffix + infix + "B"
+
+
+class DiskUsageMonitor(Monitor):
+    def __init__(self, config: config.DiskUsageMonitorConfig):
+        self.mountpoint = config.mountpoint
+        self.which = config.which
+        self.divider = float(config.unit_base) ** config.unit_exponent
+        self._unit = _make_unit(config.unit_base, config.unit_exponent)
+        super().__init__(config)
+
+    def get_datapoint(self) -> float:
+        usage = psutil.disk_usage(str(self.mountpoint))
+
+        value = 0.0
+        if self.which == config.DiskUsageValueType.FREE:
+            value = usage.free / self.divider
+        elif self.which == config.DiskUsageValueType.USED:
+            value = usage.used / self.divider
+        elif self.which == config.DiskUsageValueType.TOTAL:
+            value = usage.total / self.divider
+        elif self.which == config.DiskUsageValueType.PERCENT:
+            value = usage.percent
+        else:
+            raise TypeError(f"Unexpected disk usage type: {self.which}")
+
+        return value
+
+    @property
+    def unit(self) -> str:
+        if self.which == config.DiskUsageValueType.PERCENT:
+            return "%"
+        return self._unit
+
+
+class DiskWriteRateMonitor(Monitor):
+    def __init__(self, config: config.DiskWriteRateMonitorConfig):
+        self.disk = config.disk
+        self.divider = float(config.unit_base) ** config.unit_exponent
+        self._unit = _make_unit(config.unit_base, config.unit_exponent)
+        self.warned_io_counters_unavailable = False
+        self.last: Optional[tuple[datetime.datetime, int]] = None
+        super().__init__(config)
+
+    def get_datapoint(self) -> float:
+        if self.warned_io_counters_unavailable:
+            return 0
+
+        counter_info = psutil.disk_io_counters(True)
+        if counter_info is None:
+            logger.warning("I/O counters unavailable. Will always measure zero.")
+            self.warned_io_counters_unavailable = True
+            return 0
+
+        current_time = datetime.datetime.now()
+        current_value = counter_info[self.disk].write_bytes
+        if self.last is None:
+            self.last = (current_time, current_value)
+            return 0
+
+        prev_time, prev_value = self.last
+        interval = current_time - prev_time
+        difference = current_value - prev_value
+        self.last = (current_time, current_value)
+
+        return difference / interval.seconds / self.divider
+
+    @property
+    def unit(self) -> str:
+        return self._unit + "/second"
+
+
+class TemperatureMonitor(Monitor):
+    def __init__(self, config: config.TemperatureMonitorConfig):
+        self.sensor = config.sensor_name
+        self.index = config.index
+        self.warned_sensor_unavailable = False
+        super().__init__(config)
+
+    def get_datapoint(self) -> float:
+        if self.warned_sensor_unavailable:
+            return 0
+
+        sensors = psutil.sensors_temperatures()
+        sensor_points = sensors.get(self.sensor)
+        if sensor_points is None:
+            logger.warning(
+                f"Sensor {repr(self.sensor)} unavailable. You may need to install a temperature sensor utility. Will always measure zero."
+            )
+            self.warned_sensor_unavailable = True
+            return 0
+
+        if len(sensor_points) <= self.index:
+            logger.warning(
+                f"There are {len(sensor_points)} kinds of readings for sensor {repr(self.sensor)} but index {self.index} was given. Will always measure zero."
+            )
+            self.warned_sensor_unavailable = True
+            return 0
+
+        return sensor_points[self.index].current
+
+    @property
+    def unit(self) -> str:
+        return "ºC"
+
+
+class UptimeMonitor(Monitor):
+    def __init__(self, config: config.UptimeMonitorConfig):
+        super().__init__(config)
+
+    def get_datapoint(self) -> float:
+        now = time.time()
+        boot = psutil.boot_time()
+        uptime = now - boot
+        return uptime
+
+    @property
+    def unit(self) -> str:
+        return "seconds"
+
+
+class DBusConnectionManager:
+    _bus = None
+
+    def get_connection(self) -> Any:
+        if self._bus is None:
+            self._bus = dbus.SystemBus()
+        return self._bus
+
+
+class SystemdMonitor(Monitor):
+    def __init__(self, config: config.SystemdMonitorConfig):
+        self.service_name = config.service
+        self.connection_manager = DBusConnectionManager()
+        self.systemd_proxy: Any = None
+        self._initialize_proxy()
+        super().__init__(config)
+
+    def _initialize_proxy(self) -> None:
+        bus = self.connection_manager.get_connection()
+        systemd_object = bus.get_object(
+            "org.freedesktop.systemd1", "/org/freedesktop/systemd1"
+        )
+        self.systemd_proxy = dbus.Interface(
+            systemd_object, dbus_interface="org.freedesktop.systemd1.Manager"
+        )
+
+    def get_datapoint(self) -> float:
+        try:
+            unit_name = f"{self.service_name}.service"
+            unit = self.systemd_proxy.GetUnit(unit_name)
+            unit_object = self.connection_manager.get_connection().get_object(
+                "org.freedesktop.systemd1", str(unit)
+            )
+            unit_properties = dbus.Interface(
+                unit_object, dbus_interface="org.freedesktop.DBus.Properties"
+            )
+
+            active_state = unit_properties.Get(
+                "org.freedesktop.systemd1.Unit", "ActiveState"
+            )
+            if active_state == "active":
+                return 0
+            elif active_state == "inactive":
+                return 1
+            elif active_state == "failed":
+                return 2
+            raise TypeError(f"Unexpected service state: {active_state}")
+        except dbus.DBusException as e:
+            print(f"Error retrieving status for service '{self.service_name}': {e}")
+            return 1  # Assume stopped if there was an error
+
+    @property
+    def unit(self) -> str:
+        return "status"
+
+
+MONITORS: dict[config.MonitorName, Type[Monitor]] = {
+    config.MonitorName.LOAD_AVERAGE: LoadAverageMonitor,
+    config.MonitorName.DISK_USAGE: DiskUsageMonitor,
+    config.MonitorName.DISK_WRITE_RATE: DiskWriteRateMonitor,
+    config.MonitorName.TEMPERATURE: TemperatureMonitor,
+    config.MonitorName.UPTIME: UptimeMonitor,
+    config.MonitorName.SYSTEMD: SystemdMonitor,
+}
 
 
 def get_monitors(configuration: config.Configuration) -> MonitorCollection:
@@ -193,5 +383,6 @@ def get_monitors(configuration: config.Configuration) -> MonitorCollection:
             message = f"Bug: Monitor {monitor_config.name.value} not implemented!"
             logger.critical(message)
             raise RuntimeError(message)
-        monitors.append(monitor_class(monitor_config))
+        monitor = monitor_class(monitor_config)
+        monitors.append(monitor)
     return MonitorCollection(monitors, configuration.granularity)
