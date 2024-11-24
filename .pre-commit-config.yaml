@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: pipenv-lock-requirements
+        name: Generate requirements.txt from Pipenv.lock
+        entry: bash -c "pipenv requirements > requirements.txt && git add requirements.txt"
+        language: system
+        files: ^Pipfile\.lock$
