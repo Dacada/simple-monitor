@@ -160,6 +160,7 @@ class Configuration(BaseModel):
 
     name: str = "Node name"
     loglevel: LogLevel = LogLevel.INFO
+    log_to_file: bool = True
     monitors: list[MonitorConfig] = []
     alarms: list[AlarmerConfig] = []
     webui_port: int = 8080
