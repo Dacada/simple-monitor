@@ -22,6 +22,7 @@ class MonitorName(str, Enum):
     UPTIME = "UPTIME"
     SYSTEMD = "SYSTEMD"
     PING = "PING"
+    PACKAGE_MANAGER = "PACKAGE_MANAGER"
 
 
 class AlarmerName(str, Enum):
@@ -38,6 +39,11 @@ class DiskUsageValueType(str, Enum):
     USED = "USED"
     FREE = "FREE"
     PERCENT = "PERCENT"
+
+
+class PackageManagerType(str, Enum):
+    APT = "APT"
+    PACMAN = "PACMAN"
 
 
 class MonitorAlarmConfig(BaseModel):
@@ -108,6 +114,14 @@ class PingMonitorConfig(BaseModel):
     ip: ipaddress.IPv4Address
 
 
+class PackageManagerMonitorConfig(BaseModel):
+    name: Literal[MonitorName.PACKAGE_MANAGER]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    package_manager: PackageManagerType
+    delay: int
+
+
 class GmailAlarmerConfig(BaseModel):
     name: Literal[AlarmerName.GMAIL_ALARM]
     sender: str
@@ -126,6 +140,7 @@ MonitorConfig = Annotated[
         UptimeMonitorConfig,
         SystemdMonitorConfig,
         PingMonitorConfig,
+        PackageManagerMonitorConfig,
     ],
     Field(discriminator="name"),
 ]

@@ -10,6 +10,7 @@ import uuid
 from abc import ABC, abstractmethod
 from collections import deque
 from typing import Any, Callable, Optional, Sequence, Type
+import subprocess
 
 import dbus  # type: ignore
 import ping3  # type: ignore
@@ -411,6 +412,60 @@ class PingMonitor(Monitor):
         return "miliseconds"
 
 
+class PackageManagerMonitor(Monitor):
+    def __init__(self, configuration: config.PackageManagerMonitorConfig):
+        self._get_package_manager_upgradeable = {
+            config.PackageManagerType.APT: self._get_apt_upgradeable,
+            config.PackageManagerType.PACMAN: self._get_pacman_upgradeable,
+        }[configuration.package_manager]
+        self.delay = configuration.delay
+        self.last_upgradeable = 0
+        self._get_upgradeable_future = None
+        super().__init__(configuration)
+
+    def _get_apt_upgradeable(self) -> int:
+        result = subprocess.run(
+            ["apt", "list", "--upgradeable"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return sum(1 for line in result.stdout.splitlines() if "upgradeable" in line)
+
+    def _get_pacman_upgradeable(self) -> int:
+        result = subprocess.run(
+            ["checkupdates"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return len(result.stdout.splitlines())
+
+    def _start_get_upgradeable(self):
+        if self._get_upgradeable_future is not None:
+            return
+        self._get_upgradeable_future = ThreadManager.submit(
+            target=self._run_get_upgradeable
+        )
+
+    def _run_get_upgradeable(self):
+        try:
+            self.last_upgradeable = self._get_package_manager_upgradeable()
+        except Exception as e:
+            logger.error(f"Exception when trying to get upgradeable packages: {e}")
+        finally:
+            time.sleep(self.delay)
+            self._get_upgradeable_future = None
+
+    def get_datapoint(self) -> float:
+        self._start_get_upgradeable()
+        return self.last_upgradeable
+
+    @property
+    def unit(self) -> str:
+        return "packages"
+
+
 MONITORS: dict[config.MonitorName, Type[Monitor]] = {
     config.MonitorName.LOAD_AVERAGE: LoadAverageMonitor,
     config.MonitorName.DISK_USAGE: DiskUsageMonitor,
@@ -419,6 +474,7 @@ MONITORS: dict[config.MonitorName, Type[Monitor]] = {
     config.MonitorName.UPTIME: UptimeMonitor,
     config.MonitorName.SYSTEMD: SystemdMonitor,
     config.MonitorName.PING: PingMonitor,
+    config.MonitorName.PACKAGE_MANAGER: PackageManagerMonitor,
 }
 
 
