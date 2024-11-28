@@ -57,9 +57,10 @@ class MonitorHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
 class MonitorWebUIServer:
     def __init__(
-        self, monitor_collection: monitor.MonitorCollection, port: int
+        self, monitor_collection: monitor.MonitorCollection, address: str, port: int
     ) -> None:
         self.monitor_collection = monitor_collection
+        self.address = address
         self.port = port
         self.server: Optional[http.server.HTTPServer] = None
 
@@ -67,7 +68,7 @@ class MonitorWebUIServer:
         def handler(*args: Any, **kwargs: Any) -> MonitorHTTPRequestHandler:
             return MonitorHTTPRequestHandler(self.monitor_collection, *args, **kwargs)
 
-        self.server = http.server.HTTPServer(("localhost", self.port), handler)
+        self.server = http.server.HTTPServer((self.address, self.port), handler)
         self.server.timeout = 1
         logger.info(f"Serving monitor UI on http://localhost:{self.port}")
 
@@ -85,5 +86,7 @@ class MonitorWebUIServer:
 def setup_webui(
     configuration: config.Configuration, monitor_collection: monitor.MonitorCollection
 ) -> Callable[[threading.Event], Any]:
-    web_ui_server = MonitorWebUIServer(monitor_collection, configuration.webui_port)
+    web_ui_server = MonitorWebUIServer(
+        monitor_collection, configuration.webui_address, configuration.webui_port
+    )
     return web_ui_server.run

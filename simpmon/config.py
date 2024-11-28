@@ -163,6 +163,7 @@ class Configuration(BaseModel):
     log_to_file: bool = True
     monitors: list[MonitorConfig] = []
     alarms: list[AlarmerConfig] = []
+    webui_address: str = "localhost"
     webui_port: int = 8080
     granularity: int = 5
 
