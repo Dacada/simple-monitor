@@ -4,13 +4,13 @@ import concurrent.futures
 import datetime
 import logging
 import os
+import subprocess
 import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
 from collections import deque
 from typing import Any, Callable, Optional, Sequence, Type
-import subprocess
 
 import dbus  # type: ignore
 import ping3  # type: ignore
@@ -71,8 +71,8 @@ class Monitor(ABC):
     def unit(self) -> str:
         pass
 
-    def run(self) -> None:
-        datapoint = Point(y=self.get_datapoint(), x=datetime.datetime.now())
+    def run(self, must_exit: threading.Event) -> None:
+        datapoint = Point(y=self.get_datapoint(must_exit), x=datetime.datetime.now())
         self.datapoints.append(datapoint)
         if len(self.datapoints) > MAX_DATAPOINTS:
             self.datapoints.popleft()
@@ -80,7 +80,7 @@ class Monitor(ABC):
         self._refresh_status()
 
     @abstractmethod
-    def get_datapoint(self) -> float:
+    def get_datapoint(self, must_exit: threading.Event) -> float:
         pass
 
     def set_alarm_status(self) -> None:
@@ -155,7 +155,7 @@ class MonitorCollection:
         try:
             while not should_exit.is_set():
                 for monitor in self._monitors.values():
-                    monitor.run()
+                    monitor.run(should_exit)
                     if should_exit.is_set():
                         break
                 should_exit.wait(self.granularity)
@@ -180,7 +180,7 @@ class LoadAverageMonitor(Monitor):
         self.which = config.which
         super().__init__(config)
 
-    def get_datapoint(self) -> float:
+    def get_datapoint(self, must_exit: threading.Event) -> float:
         return os.getloadavg()[self.which]
 
     @property
@@ -202,7 +202,7 @@ class DiskUsageMonitor(Monitor):
         self._unit = _make_unit(config.unit_base, config.unit_exponent)
         super().__init__(config)
 
-    def get_datapoint(self) -> float:
+    def get_datapoint(self, must_exit: threading.Event) -> float:
         usage = psutil.disk_usage(str(self.mountpoint))
 
         value = 0.0
@@ -235,7 +235,7 @@ class DiskWriteRateMonitor(Monitor):
         self.last: Optional[tuple[datetime.datetime, int]] = None
         super().__init__(config)
 
-    def get_datapoint(self) -> float:
+    def get_datapoint(self, must_exit: threading.Event) -> float:
         if self.warned_io_counters_unavailable:
             return 0
 
@@ -270,7 +270,7 @@ class TemperatureMonitor(Monitor):
         self.warned_sensor_unavailable = False
         super().__init__(config)
 
-    def get_datapoint(self) -> float:
+    def get_datapoint(self, must_exit: threading.Event) -> float:
         if self.warned_sensor_unavailable:
             return 0
 
@@ -301,7 +301,7 @@ class UptimeMonitor(Monitor):
     def __init__(self, config: config.UptimeMonitorConfig):
         super().__init__(config)
 
-    def get_datapoint(self) -> float:
+    def get_datapoint(self, must_exit: threading.Event) -> float:
         now = time.time()
         boot = psutil.boot_time()
         uptime = now - boot
@@ -338,7 +338,7 @@ class SystemdMonitor(Monitor):
             systemd_object, dbus_interface="org.freedesktop.systemd1.Manager"
         )
 
-    def get_datapoint(self) -> float:
+    def get_datapoint(self, must_exit: threading.Event) -> float:
         try:
             unit_name = f"{self.service_name}.service"
             unit = self.systemd_proxy.GetUnit(unit_name)
@@ -372,10 +372,12 @@ class ThreadManager:
     _thread_executor = None
 
     @staticmethod
-    def submit(target: Callable[..., Any]) -> concurrent.futures.Future[Any]:
+    def submit(
+        target: Callable[..., Any], must_exit: threading.Event
+    ) -> concurrent.futures.Future[Any]:
         if ThreadManager._thread_executor is None:
             ThreadManager._thread_executor = concurrent.futures.ThreadPoolExecutor()
-        return ThreadManager._thread_executor.submit(target)
+        return ThreadManager._thread_executor.submit(target, must_exit)
 
 
 class PingMonitor(Monitor):
@@ -384,14 +386,13 @@ class PingMonitor(Monitor):
         self._last_ping = -1
         self._ping_future: Optional[concurrent.futures.Future[Any]] = None
         super().__init__(config)
-        self._start_ping()
 
-    def _start_ping(self) -> None:
+    def _start_ping(self, must_exit: threading.Event) -> None:
         if self._ping_future is not None:
             return
-        self._ping_future = ThreadManager.submit(target=self._run_ping)
+        self._ping_future = ThreadManager.submit(self._run_ping, must_exit)
 
-    def _run_ping(self) -> None:
+    def _run_ping(self, must_exit: threading.Event) -> None:
         try:
             response_time = ping3.ping(str(self.ip))
             if response_time is None:
@@ -403,8 +404,8 @@ class PingMonitor(Monitor):
         finally:
             self._ping_future = None
 
-    def get_datapoint(self) -> float:
-        self._start_ping()
+    def get_datapoint(self, must_exit: threading.Event) -> float:
+        self._start_ping(must_exit)
         return self._last_ping * 1000
 
     @property
@@ -420,7 +421,7 @@ class PackageManagerMonitor(Monitor):
         }[configuration.package_manager]
         self.delay = configuration.delay
         self.last_upgradeable = 0
-        self._get_upgradeable_future = None
+        self._get_upgradeable_future: Optional[concurrent.futures.Future[Any]] = None
         super().__init__(configuration)
 
     def _get_apt_upgradeable(self) -> int:
@@ -441,24 +442,24 @@ class PackageManagerMonitor(Monitor):
         )
         return len(result.stdout.splitlines())
 
-    def _start_get_upgradeable(self):
+    def _start_get_upgradeable(self, must_exit: threading.Event) -> None:
         if self._get_upgradeable_future is not None:
             return
         self._get_upgradeable_future = ThreadManager.submit(
-            target=self._run_get_upgradeable
+            self._run_get_upgradeable, must_exit
         )
 
-    def _run_get_upgradeable(self):
+    def _run_get_upgradeable(self, must_exit: threading.Event) -> None:
         try:
             self.last_upgradeable = self._get_package_manager_upgradeable()
         except Exception as e:
             logger.error(f"Exception when trying to get upgradeable packages: {e}")
         finally:
-            time.sleep(self.delay)
+            must_exit.wait(self.delay)
             self._get_upgradeable_future = None
 
-    def get_datapoint(self) -> float:
-        self._start_get_upgradeable()
+    def get_datapoint(self, must_exit: threading.Event) -> float:
+        self._start_get_upgradeable(must_exit)
         return self.last_upgradeable
 
     @property
