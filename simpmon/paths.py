@@ -20,10 +20,14 @@ def dir_home(envvar: str, fallback: Path) -> Path:
 
 
 def config_home() -> Path:
+    if os.geteuid() == 0:
+        return Path("/etc")
     return dir_home("XDG_CONFIG_HOME", Path(".config"))
 
 
-def data_home() -> Path:
+def log_home() -> Path:
+    if os.geteuid() == 0:
+        return Path("/var/log")
     return dir_home("XDG_DATA_HOME", Path(".local/share"))
 
 
@@ -32,4 +36,4 @@ def config_path() -> Path:
 
 
 def log_path() -> Path:
-    return data_home() / appname() / "log.txt"
+    return log_home() / appname() / "log.txt"
