@@ -21,11 +21,14 @@ def main() -> int:
     alarm_manager = alarm.get_alarm_manager(configuration, monitors)
 
     must_exit = threading.Event()
+    error_exit = threading.Event()
 
     threads = []
-    threads.append(threading.Thread(target=monitors.run, args=(must_exit,)))
-    threads.append(threading.Thread(target=run_webui, args=(must_exit,)))
-    threads.append(threading.Thread(target=alarm_manager.run, args=(must_exit,)))
+    threads.append(threading.Thread(target=monitors.run, args=(must_exit, error_exit)))
+    threads.append(threading.Thread(target=run_webui, args=(must_exit, error_exit)))
+    threads.append(
+        threading.Thread(target=alarm_manager.run, args=(must_exit, error_exit))
+    )
 
     def exit_handler(*_: Any) -> None:
         logging.info("Exit signal received.")
@@ -48,6 +51,8 @@ def main() -> int:
     for thread in threads:
         thread.join()
 
+    if error_exit.is_set():
+        return 2
     return 0
 
 

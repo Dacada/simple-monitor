@@ -228,7 +228,7 @@ class AlarmManager:
         self._alarmers = alarmers
         self.granularity = granularity
 
-    def run(self, must_exit: threading.Event) -> None:
+    def run(self, must_exit: threading.Event, error_exit: threading.Event) -> None:
         try:
             while not must_exit.is_set():
                 for alarmer in self._alarmers:
@@ -239,6 +239,7 @@ class AlarmManager:
         except Exception as e:
             logger.critical(f"Unhandled exception in monitor {e}", exc_info=True)
             must_exit.set()
+            error_exit.set()
             return
 
 

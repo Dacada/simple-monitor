@@ -64,7 +64,9 @@ class MonitorWebUIServer:
         self.port = port
         self.server: Optional[http.server.HTTPServer] = None
 
-    def run(self, must_exit_event: threading.Event) -> None:
+    def run(
+        self, must_exit_event: threading.Event, error_exit_event: threading.Event
+    ) -> None:
         def handler(*args: Any, **kwargs: Any) -> MonitorHTTPRequestHandler:
             return MonitorHTTPRequestHandler(self.monitor_collection, *args, **kwargs)
 
@@ -80,6 +82,7 @@ class MonitorWebUIServer:
                     f"Unhandled exception on web server: {e}", exc_info=True
                 )
                 must_exit_event.set()
+                error_exit_event.set()
 
         self.server.server_close()
 

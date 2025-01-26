@@ -151,7 +151,7 @@ class MonitorCollection:
         self._monitors = {monitor.id: monitor for monitor in monitors}
         self.granularity = granularity
 
-    def run(self, should_exit: threading.Event) -> None:
+    def run(self, should_exit: threading.Event, error_exit: threading.Event) -> None:
         try:
             while not should_exit.is_set():
                 for monitor in self._monitors.values():
@@ -162,6 +162,7 @@ class MonitorCollection:
         except Exception as e:
             logger.critical(f"Unhandled exception in monitor: {e}", exc_info=True)
             should_exit.set()
+            error_exit.set()
             return
 
     def get_status(self) -> dict[uuid.UUID, MonitorStatus]:
