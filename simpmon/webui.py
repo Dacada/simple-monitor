@@ -89,7 +89,7 @@ class MonitorWebUIServer:
 
 def setup_webui(
     configuration: config.Configuration, monitor_collection: monitor.MonitorCollection
-) -> Callable[[threading.Event], Any]:
+) -> Callable[[threading.Event, threading.Event], Any]:
     web_ui_server = MonitorWebUIServer(
         monitor_collection, configuration.webui_address, configuration.webui_port
     )
