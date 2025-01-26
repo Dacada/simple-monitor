@@ -160,8 +160,7 @@ class MonitorCollection:
                         break
                 should_exit.wait(self.granularity)
         except Exception as e:
-            logger.critical(f"Unhandled exception in monitor: {e}")
-            logger.debug("Exception info", exc_info=True)
+            logger.critical(f"Unhandled exception in monitor: {e}", exc_info=True)
             should_exit.set()
             return
 

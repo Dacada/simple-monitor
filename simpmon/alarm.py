@@ -216,8 +216,9 @@ class EmailAlarmer(Alarmer):
             server.sendmail(self.sender, self.receiver, msg.as_string())
             logger.info(f"Sent email to {self.receiver}")
         except Exception as e:
-            logger.error(f"Failed to send email to {self.receiver}! Error: {e}")
-            logger.debug("Exception info.", exc_info=True)
+            logger.error(
+                f"Failed to send email to {self.receiver}! Error: {e}", exc_info=True
+            )
         finally:
             server.quit()
 
@@ -236,8 +237,7 @@ class AlarmManager:
                         break
                 must_exit.wait(self.granularity)
         except Exception as e:
-            logger.critical(f"Unhandled exception in monitor {e}")
-            logger.debug("Exception info", exc_info=True)
+            logger.critical(f"Unhandled exception in monitor {e}", exc_info=True)
             must_exit.set()
             return
 

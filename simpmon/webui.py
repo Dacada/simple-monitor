@@ -76,8 +76,9 @@ class MonitorWebUIServer:
             try:
                 self.server.handle_request()
             except Exception as e:
-                logger.critical(f"Unhandled exception on web server: {e}")
-                logger.debug("Exception info", exc_info=True)
+                logger.critical(
+                    f"Unhandled exception on web server: {e}", exc_info=True
+                )
                 must_exit_event.set()
 
         self.server.server_close()
