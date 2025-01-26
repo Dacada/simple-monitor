@@ -466,6 +466,29 @@ class PackageManagerMonitor(Monitor):
         return "packages"
 
 
+class HeartbeatMonitor(Monitor):
+    def __init__(self, config: config.HeartbeatMonitorConfig):
+        self.alarm_time = config.alarm_time
+        self.last_alert_date: Optional[datetime.date] = None
+        super().__init__(config)
+
+    def get_datapoint(self, must_exit: threading.Event) -> float:
+        current_datetime = datetime.datetime.now()
+        today = current_datetime.date()
+        now = current_datetime.time()
+
+        if now >= self.alarm_time:
+            if self.last_alert_date is None or self.last_alert_date != today:
+                self.last_alert_date = today
+                return 1
+
+        return 0
+
+    @property
+    def unit(self) -> str:
+        return "seconds"
+
+
 MONITORS: dict[config.MonitorName, Type[Monitor]] = {
     config.MonitorName.LOAD_AVERAGE: LoadAverageMonitor,
     config.MonitorName.DISK_USAGE: DiskUsageMonitor,

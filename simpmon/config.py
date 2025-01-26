@@ -23,6 +23,7 @@ class MonitorName(str, Enum):
     SYSTEMD = "SYSTEMD"
     PING = "PING"
     PACKAGE_MANAGER = "PACKAGE_MANAGER"
+    HEARTBEAT = "HEARTBEAT"
 
 
 class AlarmerName(str, Enum):
@@ -122,6 +123,13 @@ class PackageManagerMonitorConfig(BaseModel):
     delay: int
 
 
+class HeartbeatMonitorConfig(BaseModel):
+    name: Literal[MonitorName.HEARTBEAT]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    alarm_time: datetime.time
+
+
 class GmailAlarmerConfig(BaseModel):
     name: Literal[AlarmerName.GMAIL_ALARM]
     sender: str
@@ -141,6 +149,7 @@ MonitorConfig = Annotated[
         SystemdMonitorConfig,
         PingMonitorConfig,
         PackageManagerMonitorConfig,
+        HeartbeatMonitorConfig,
     ],
     Field(discriminator="name"),
 ]
