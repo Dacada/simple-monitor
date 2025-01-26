@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import uuid
 import datetime
 from simpmon.alarm import Alarmer, AlarmerAlarmInfo
-from simpmon.monitor import MonitorStatus, Point
+from simpmon.monitor import MonitorStatus
 from simpmon.config import MonitorAlarmConfig, MonitorAlarmExceedanceType
 
 
 # Define a concrete implementation of the abstract Alarmer class for testing
-class TestAlarmer(Alarmer):
+class MockAlarmer(Alarmer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ended_alarms = []
@@ -47,7 +47,7 @@ def mock_configuration():
 
 @pytest.fixture
 def alarmer(mock_monitor_collection, mock_configuration):
-    return TestAlarmer(
+    return MockAlarmer(
         configuration=mock_configuration,
         monitor_collection=mock_monitor_collection,
         node_name="test-node",
