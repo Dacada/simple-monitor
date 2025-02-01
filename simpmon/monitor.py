@@ -499,6 +499,7 @@ MONITORS: dict[config.MonitorName, Type[Monitor]] = {
     config.MonitorName.SYSTEMD: SystemdMonitor,
     config.MonitorName.PING: PingMonitor,
     config.MonitorName.PACKAGE_MANAGER: PackageManagerMonitor,
+    config.MonitorName.HEARTBEAT: HeartbeatMonitor,
 }
 
 
