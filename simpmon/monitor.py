@@ -397,7 +397,8 @@ class PingMonitor(Monitor):
             response_time = ping3.ping(str(self.ip))
             if response_time is None:
                 self._last_ping = -1
-            self._last_ping = response_time
+            else:
+                self._last_ping = response_time
         except Exception as e:
             logger.warning(f"Exception when trying to ping to {self.ip}: {e}")
             self._last_ping = -1
