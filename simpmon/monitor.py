@@ -321,6 +321,11 @@ class DBusConnectionManager:
             DBusConnectionManager._bus = dbus.SystemBus()
         return DBusConnectionManager._bus
 
+    @staticmethod
+    def reset_connection() -> None:
+        """Clear the cached dbus connection to force reconnection on next use."""
+        DBusConnectionManager._bus = None
+
 
 class SystemdMonitor(Monitor):
     def __init__(self, config: config.SystemdMonitorConfig):
@@ -339,7 +344,8 @@ class SystemdMonitor(Monitor):
         )
 
     def get_datapoint(self, must_exit: threading.Event) -> float:
-        try:
+        def _query_service_state() -> float:
+            """Query the service state via dbus."""
             unit_name = f"{self.service_name}.service"
             unit = self.systemd_proxy.GetUnit(unit_name)
             unit_object = DBusConnectionManager.get_connection().get_object(
@@ -359,9 +365,26 @@ class SystemdMonitor(Monitor):
             elif active_state == "failed":
                 return 2
             raise TypeError(f"Unexpected service state: {active_state}")
+
+        try:
+            return _query_service_state()
         except dbus.DBusException as e:
-            print(f"Error retrieving status for service '{self.service_name}': {e}")
-            return 1  # Assume stopped if there was an error
+            # dbus connection may have gone stale. Log it, reset the cached connection,
+            # reinitialize the proxy, and retry once.
+            logger.warning(
+                f"DBus error querying service '{self.service_name}': {e}. "
+                f"Attempting to reconnect and retry."
+            )
+            DBusConnectionManager.reset_connection()
+            self._initialize_proxy()
+            try:
+                return _query_service_state()
+            except dbus.DBusException as retry_error:
+                logger.error(
+                    f"Retry failed for service '{self.service_name}': {retry_error}. "
+                    f"Assuming service is stopped."
+                )
+                return 1
 
     @property
     def unit(self) -> str:
