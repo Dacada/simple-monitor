@@ -343,31 +343,31 @@ class SystemdMonitor(Monitor):
             systemd_object, dbus_interface="org.freedesktop.systemd1.Manager"
         )
 
+    def _query_service_state(self) -> float:
+        """Query the service state via dbus."""
+        unit_name = f"{self.service_name}.service"
+        unit = self.systemd_proxy.GetUnit(unit_name)
+        unit_object = DBusConnectionManager.get_connection().get_object(
+            "org.freedesktop.systemd1", str(unit)
+        )
+        unit_properties = dbus.Interface(
+            unit_object, dbus_interface="org.freedesktop.DBus.Properties"
+        )
+
+        active_state = unit_properties.Get(
+            "org.freedesktop.systemd1.Unit", "ActiveState"
+        )
+        if active_state == "active":
+            return 0
+        elif active_state == "inactive":
+            return 1
+        elif active_state == "failed":
+            return 2
+        raise TypeError(f"Unexpected service state: {active_state}")
+
     def get_datapoint(self, must_exit: threading.Event) -> float:
-        def _query_service_state() -> float:
-            """Query the service state via dbus."""
-            unit_name = f"{self.service_name}.service"
-            unit = self.systemd_proxy.GetUnit(unit_name)
-            unit_object = DBusConnectionManager.get_connection().get_object(
-                "org.freedesktop.systemd1", str(unit)
-            )
-            unit_properties = dbus.Interface(
-                unit_object, dbus_interface="org.freedesktop.DBus.Properties"
-            )
-
-            active_state = unit_properties.Get(
-                "org.freedesktop.systemd1.Unit", "ActiveState"
-            )
-            if active_state == "active":
-                return 0
-            elif active_state == "inactive":
-                return 1
-            elif active_state == "failed":
-                return 2
-            raise TypeError(f"Unexpected service state: {active_state}")
-
         try:
-            return _query_service_state()
+            return self._query_service_state()
         except dbus.DBusException as e:
             # dbus connection may have gone stale. Log it, reset the cached connection,
             # reinitialize the proxy, and retry once.
@@ -378,7 +378,7 @@ class SystemdMonitor(Monitor):
             DBusConnectionManager.reset_connection()
             self._initialize_proxy()
             try:
-                return _query_service_state()
+                return self._query_service_state()
             except dbus.DBusException as retry_error:
                 logger.error(
                     f"Retry failed for service '{self.service_name}': {retry_error}. "
