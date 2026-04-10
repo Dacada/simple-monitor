@@ -21,6 +21,7 @@ class MonitorName(str, Enum):
     TEMPERATURE = "TEMPERATURE"
     UPTIME = "UPTIME"
     SYSTEMD = "SYSTEMD"
+    SYSTEMD_ONESHOT = "SYSTEMD_ONESHOT"
     PING = "PING"
     PACKAGE_MANAGER = "PACKAGE_MANAGER"
     HEARTBEAT = "HEARTBEAT"
@@ -108,6 +109,14 @@ class SystemdMonitorConfig(BaseModel):
     service: str
 
 
+class SystemdOneshotMonitorConfig(BaseModel):
+    name: Literal[MonitorName.SYSTEMD_ONESHOT]
+    title: str
+    alarms: list[MonitorAlarmConfig]
+    service: str
+    fail_on_failure: bool = False
+
+
 class PingMonitorConfig(BaseModel):
     name: Literal[MonitorName.PING]
     title: str
@@ -147,6 +156,7 @@ MonitorConfig = Annotated[
         TemperatureMonitorConfig,
         UptimeMonitorConfig,
         SystemdMonitorConfig,
+        SystemdOneshotMonitorConfig,
         PingMonitorConfig,
         PackageManagerMonitorConfig,
         HeartbeatMonitorConfig,

@@ -327,9 +327,10 @@ class DBusConnectionManager:
         DBusConnectionManager._bus = None
 
 
-class SystemdMonitor(Monitor):
-    def __init__(self, config: config.SystemdMonitorConfig):
-        self.service_name = config.service
+class BaseSystemdMonitor(Monitor):
+    """Base class for systemd-based monitors."""
+    def __init__(self, config: config.MonitorConfig):
+        self.service_name: str = getattr(config, 'service', '')
         self.systemd_proxy: Any = None
         self._initialize_proxy()
         super().__init__(config)
@@ -343,16 +344,25 @@ class SystemdMonitor(Monitor):
             systemd_object, dbus_interface="org.freedesktop.systemd1.Manager"
         )
 
-    def _query_service_state(self) -> float:
-        """Query the service state via dbus."""
-        unit_name = f"{self.service_name}.service"
+    def _get_unit_properties(self, unit_name: str) -> Any:
+        """Get dbus interface for unit properties."""
         unit = self.systemd_proxy.GetUnit(unit_name)
         unit_object = DBusConnectionManager.get_connection().get_object(
             "org.freedesktop.systemd1", str(unit)
         )
-        unit_properties = dbus.Interface(
+        return dbus.Interface(
             unit_object, dbus_interface="org.freedesktop.DBus.Properties"
         )
+
+
+class SystemdMonitor(BaseSystemdMonitor):
+    def __init__(self, config: config.SystemdMonitorConfig):
+        super().__init__(config)
+
+    def _query_service_state(self) -> float:
+        """Query the service state via dbus."""
+        unit_name = f"{self.service_name}.service"
+        unit_properties = self._get_unit_properties(unit_name)
 
         active_state = unit_properties.Get(
             "org.freedesktop.systemd1.Unit", "ActiveState"
@@ -389,6 +399,46 @@ class SystemdMonitor(Monitor):
     @property
     def unit(self) -> str:
         return "status"
+
+
+class SystemdOneshotMonitor(BaseSystemdMonitor):
+    def __init__(self, config: config.SystemdOneshotMonitorConfig):
+        self.fail_on_failure = config.fail_on_failure
+        super().__init__(config)
+
+    def get_datapoint(self, must_exit: threading.Event) -> float:
+        try:
+            unit_name = f"{self.service_name}.service"
+            unit_properties = self._get_unit_properties(unit_name)
+
+            result = unit_properties.Get(
+                "org.freedesktop.systemd1.Unit", "Result"
+            )
+
+            exit_timestamp = unit_properties.Get(
+                "org.freedesktop.systemd1.Service", "ExecMainExitTimestamp"
+            )
+
+            if exit_timestamp == 0:
+                return 999999999.0
+
+            exit_time = datetime.datetime.fromtimestamp(exit_timestamp / 1_000_000)
+            age_seconds = (datetime.datetime.now() - exit_time).total_seconds()
+
+            if self.fail_on_failure and result != "success":
+                return -1.0
+
+            return age_seconds
+
+        except dbus.DBusException as e:
+            logger.error(
+                f"Error retrieving status for oneshot service '{self.service_name}': {e}"
+            )
+            return 999999999.0
+
+    @property
+    def unit(self) -> str:
+        return "seconds"
 
 
 class ThreadManager:
@@ -521,6 +571,7 @@ MONITORS: dict[config.MonitorName, Type[Monitor]] = {
     config.MonitorName.TEMPERATURE: TemperatureMonitor,
     config.MonitorName.UPTIME: UptimeMonitor,
     config.MonitorName.SYSTEMD: SystemdMonitor,
+    config.MonitorName.SYSTEMD_ONESHOT: SystemdOneshotMonitor,
     config.MonitorName.PING: PingMonitor,
     config.MonitorName.PACKAGE_MANAGER: PackageManagerMonitor,
     config.MonitorName.HEARTBEAT: HeartbeatMonitor,
