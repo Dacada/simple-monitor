@@ -408,11 +408,14 @@ class SystemdOneshotMonitor(BaseSystemdMonitor):
 
     def get_datapoint(self, must_exit: threading.Event) -> float:
         try:
-            unit_name = f"{self.service_name}.service"
+            if self.service_name.endswith(".service"):
+                unit_name = self.service_name
+            else:
+                unit_name = f"{self.service_name}.service"
             unit_properties = self._get_unit_properties(unit_name)
 
             result = unit_properties.Get(
-                "org.freedesktop.systemd1.Unit", "Result"
+                "org.freedesktop.systemd1.Service", "Result"
             )
 
             exit_timestamp = unit_properties.Get(
@@ -434,7 +437,7 @@ class SystemdOneshotMonitor(BaseSystemdMonitor):
             logger.error(
                 f"Error retrieving status for oneshot service '{self.service_name}': {e}"
             )
-            return 999999999.0
+            return 555555555.0
 
     @property
     def unit(self) -> str:
